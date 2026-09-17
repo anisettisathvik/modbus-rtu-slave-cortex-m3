@@ -1,0 +1,62 @@
+name: verification
+on: [push, pull_request]
+
+jobs:
+  host:
+    name: host verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang cppcheck socat lcov
+          pip install pyserial
+      - name: Directed unit tests (ASan + UBSan)
+        run: make test
+      - name: Constrained-random, coverage closure
+        run: make random RAND_ITERS=500000
+      - name: Multi-slave bus contention proof
+        run: make bus
+      - name: Coverage must stay at 100%
+        run: |
+          make coverage | tee cov.txt
+          grep -q "Lines executed:100.00%" cov.txt
+          grep -q "Taken at least once:100.00%" cov.txt
+      - name: Static analysis
+        run: make analyze
+      - name: Fuzz
+        run: make fuzz FUZZ_TIME=120
+      - name: Virtual-serial loopback
+        run: make loopback
+      - name: Regression seeds
+        run: |
+          for s in 0x1 0xDEADBEEF 0xC0FFEE 0x5A5A5A5A 0xFFFFFFFF; do
+            ./build/random_test 100000 $s || exit 1
+          done
+
+  firmware:
+    name: Cortex-M3 firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ARM toolchain and QEMU
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gcc-arm-none-eabi qemu-system-arm
+      - name: Cross-compile for ARMv7-M
+        run: make firmware
+      - name: Confirm the image is really ARM
+        run: |
+          file build/firmware.elf | tee fw.txt
+          grep -q "ARM" fw.txt
+      - name: Drive the firmware with a real Modbus master
+        run: |
+          ./tools/run_firmware_test.sh | tee fw_test.txt
+          grep -q "9 passed, 0 failed" fw_test.txt
+      - name: Confirm the hardware path actually ran
+        run: |
+          # frames delimited by the t3.5 timer, bytes through the RX ISR
+          grep -qE "frames=[1-9]" logs/firmware_console.log
+          grep -qE "rx_bytes=[1-9]" logs/firmware_console.log
+          grep -q "overruns=0" logs/firmware_console.log
