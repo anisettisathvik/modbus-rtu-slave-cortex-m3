@@ -14,7 +14,7 @@ transmit simultaneously on a shared bus.
 ## Repository layout
 
 ```
-mb-rtu/
+modbus-rtu-slave-cortex-m3/
 ├── src/
 │   ├── modbus_slave.h        protocol API, function and exception codes
 │   ├── modbus_slave.c        frame validation, function decode, exceptions
